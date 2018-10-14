@@ -23,7 +23,6 @@ mod sliding_window;
 use config::Configuration;
 use sender::Sender;
 use receiver::Receiver;
-use bbr_transport::BBRTransport;
 
 
 fn main() -> Result<(), IOError> {

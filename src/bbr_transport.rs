@@ -22,41 +22,47 @@ pub fn buf2string(buf: &[u8]) -> String {
 
 pub struct BBRTransport {
     socket: UdpSocket,
+    remote_addr: SocketAddr,
     seq_num: u64
 }
 
 impl BBRTransport {
+    /// Constructs a simple message w/out a payload
+    fn construct_message<'a>(msg_type: Type, seq_num: u64) -> FlatBufferBuilder<'a> {
+        let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_PACKET_SIZE);
+
+        let msg = Message::create(&mut fbb, &MessageArgs { msg_type, seq_num, payload: None });
+
+        fbb.finish(msg, None);
+
+        // TODO: Remove the need to return the FBB
+        return fbb;
+    }
+
     /// Connect, via BBR, to a remote host
-    pub fn connect(addr: SocketAddr) -> Result<BBRTransport, IOError> {
-        let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), addr.port());
+    pub fn connect(remote_addr: SocketAddr) -> Result<BBRTransport, IOError> {
+        let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), remote_addr.port());
         let socket = UdpSocket::bind(local_addr)?;
 
         // set the read and write timeouts to 3s
         socket.set_read_timeout(Some(Duration::new(3, 0)))?;
         socket.set_write_timeout(Some(Duration::new(3, 0)))?;
 
-        // "connect" the socket to the end-point address
-        socket.connect(addr).expect("Error connecting UDP socket");
-
         // construct the Connect message
-        let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_PACKET_SIZE);
-
-        let msg = Message::create(&mut fbb, &MessageArgs { msg_type: Type::Connect, seq_num: 0, payload: None });
-
-        fbb.finish(msg, None);
-        let msg_data = fbb.finished_data();
+        let msg_data = BBRTransport::construct_message(Type::Connect, 0);
+        let msg_data = msg_data.finished_data();
 
         if msg_data.len() > MAX_PACKET_SIZE {
             panic!("Packet size too large: {}", msg_data.len());
         }
 
         // send the connection message
-        socket.send(msg_data).expect("Could not send connect message");
+        socket.send_to(&msg_data, remote_addr).expect("Could not send connect message");
 
         let mut buf = vec![0; MAX_PACKET_SIZE];
 
         for i in 0..3 {
-            let ret = socket.recv(&mut buf);
+            let ret = socket.recv_from(&mut buf);
 
             debug!("{}: {:?}", i, ret);
 
@@ -85,7 +91,32 @@ impl BBRTransport {
             return Err(IOError::new(ErrorKind::InvalidData, "Acknowledged wrong sequence number"));
         }
 
-        return Ok(BBRTransport { socket, seq_num: 1 });
+        return Ok(BBRTransport { socket, remote_addr, seq_num: 1 });
+    }
+
+    pub fn listen(port: u16) -> Result<BBRTransport, IOError> {
+        let socket = UdpSocket::bind(SocketAddr::new("0.0.0.0".parse().unwrap(), port))?;
+
+        // set the write timeouts to 3s
+        socket.set_write_timeout(Some(Duration::new(3, 0)))?;
+
+        let mut buf = vec![0; MAX_PACKET_SIZE];
+        let (buf_size, remote_addr) = socket.recv_from(&mut buf)?;
+
+        let msg = get_root_as_message(&buf);
+
+        if msg.msg_type() != Type::Connect {
+            return Err(IOError::new(ErrorKind::ConnectionAborted, "Got non-connect message"));
+        }
+
+        // construct the ACK message
+        let ack_data = BBRTransport::construct_message(Type::Acknowledge, msg.seq_num());
+        let ack_data = ack_data.finished_data();
+
+        // send the ACK message
+        socket.send_to(ack_data, remote_addr);
+
+        return Ok(BBRTransport { socket, remote_addr, seq_num: 0 });
     }
 }
 

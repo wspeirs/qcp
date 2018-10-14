@@ -10,6 +10,16 @@ const MAX_PAYLOAD_SIZE :usize = 1465;   // max payload size to ensure the packet
 use flatbuffers::FlatBufferBuilder;
 use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
 
+pub fn buf2string(buf: &[u8]) -> String {
+    let mut ret = String::new();
+
+    for &b in buf {
+        ret.push_str(format!("{:02X} ", b).as_str());
+    }
+
+    ret
+}
+
 pub struct BBRTransport {
     socket: UdpSocket,
     seq_num: u64
@@ -22,8 +32,8 @@ impl BBRTransport {
         let socket = UdpSocket::bind(local_addr)?;
 
         // set the read and write timeouts to 3s
-        socket.set_read_timeout(Some(Duration::new(3, 0)));
-        socket.set_write_timeout(Some(Duration::new(3, 0)));
+        socket.set_read_timeout(Some(Duration::new(3, 0)))?;
+        socket.set_write_timeout(Some(Duration::new(3, 0)))?;
 
         // "connect" the socket to the end-point address
         socket.connect(addr).expect("Error connecting UDP socket");
@@ -44,12 +54,31 @@ impl BBRTransport {
         socket.send(msg_data).expect("Could not send connect message");
 
         let mut buf = vec![0; MAX_PACKET_SIZE];
-        socket.recv(&mut buf)?;
+
+        for i in 0..3 {
+            let ret = socket.recv(&mut buf);
+
+            debug!("{}: {:?}", i, ret);
+
+            if let Result::Err(e) = ret {
+                // check for other errors than a blocking one
+                if e.kind() != ErrorKind::WouldBlock {
+                    return Err(e);
+                // check to see if we've tried enough time
+                } else if i >= 2 {
+                    return Err(IOError::new(ErrorKind::ConnectionAborted, "Did not get Acknowledge on Connect"));
+                }
+            } else {
+                break; // it all worked!
+            }
+        }
+
+        debug!("RET: {}", buf2string(&buf));
 
         let ack = get_root_as_message(&buf);
 
         if ack.msg_type() != Type::Acknowledge {
-            return Err(IOError::new(ErrorKind::ConnectionAborted, "Did not get Acknowledge on Connect"));
+            return Err(IOError::new(ErrorKind::ConnectionAborted, "Got other message type than Acknowledge on Connect"));
         }
 
         if ack.seq_num() != 0 {
@@ -78,19 +107,24 @@ impl Transport for BBRTransport {
 #[cfg(test)]
 mod tests {
     use std::u64::MAX;
+    use simplelog::{TermLogger, LevelFilter, Config};
+
+    use bbr_transport::{BBRTransport, buf2string};
+    use std::net::SocketAddr;
 
     use flatbuffers::FlatBufferBuilder;
     use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
 
 
-    pub fn buf2string(buf: &[u8]) -> String {
-        let mut ret = String::new();
+    #[test]
+    fn connect() {
+        TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
-        for &b in buf {
-            ret.push_str(format!("{:02X} ", b).as_str());
-        }
+        let t = BBRTransport::connect("192.168.1.123:1234".parse().unwrap());
 
-        ret
+        assert!(t.is_err());
+
+        println!("{:?}", t.err());
     }
 
     #[test]

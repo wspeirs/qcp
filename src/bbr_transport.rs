@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use transport::Transport;
 
-const MAX_BUFFER_SIZE :usize = 1500;  // max size of a buffer
+const MAX_PACKET_SIZE :usize = 1500;    // max size of a packet to be sent over the wire
+const MAX_PAYLOAD_SIZE :usize = 1465;   // max payload size to ensure the packet is <= MAX_PACKET_SIZE
 
 use flatbuffers::FlatBufferBuilder;
 use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
@@ -15,6 +16,7 @@ pub struct BBRTransport {
 }
 
 impl BBRTransport {
+    /// Connect, via BBR, to a remote host
     pub fn connect(addr: SocketAddr) -> Result<BBRTransport, IOError> {
         let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), addr.port());
         let socket = UdpSocket::bind(local_addr)?;
@@ -27,17 +29,21 @@ impl BBRTransport {
         socket.connect(addr).expect("Error connecting UDP socket");
 
         // construct the Connect message
-        let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_BUFFER_SIZE);
+        let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_PACKET_SIZE);
 
         let msg = Message::create(&mut fbb, &MessageArgs { msg_type: Type::Connect, seq_num: 0, payload: None });
 
         fbb.finish(msg, None);
         let msg_data = fbb.finished_data();
 
+        if msg_data.len() > MAX_PACKET_SIZE {
+            panic!("Packet size too large: {}", msg_data.len());
+        }
+
         // send the connection message
         socket.send(msg_data).expect("Could not send connect message");
 
-        let mut buf = vec![0; MAX_BUFFER_SIZE];
+        let mut buf = vec![0; MAX_PACKET_SIZE];
         socket.recv(&mut buf)?;
 
         let ack = get_root_as_message(&buf);
@@ -74,7 +80,7 @@ mod tests {
     use std::u64::MAX;
 
     use flatbuffers::FlatBufferBuilder;
-    use message_generated::bbr::{Message, MessageArgs, Type};
+    use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
 
 
     pub fn buf2string(buf: &[u8]) -> String {
@@ -86,7 +92,6 @@ mod tests {
 
         ret
     }
-
 
     #[test]
     fn encode() {
@@ -102,5 +107,14 @@ mod tests {
 
         println!("LEN: {}", msg_buf.len());
         println!("{}", buf2string(msg_buf));
+    }
+
+    #[test]
+    fn decode_fail() {
+        let msg_buf = vec![0; 1500];
+
+        let msg = get_root_as_message(&msg_buf);
+
+        println!("{:?}", msg.msg_type());
     }
 }

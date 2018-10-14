@@ -19,15 +19,16 @@ pub mod bbr {
 #[repr(i8)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Type {
-  Connect = 0,
-  Disconnect = 1,
-  Acknowledge = 2,
-  Message = 3,
+  Error = 0,
+  Connect = 1,
+  Disconnect = 2,
+  Acknowledge = 3,
+  Message = 4,
 
 }
 
 const ENUM_MIN_TYPE: i8 = 0;
-const ENUM_MAX_TYPE: i8 = 3;
+const ENUM_MAX_TYPE: i8 = 4;
 
 impl<'a> flatbuffers::Follow<'a> for Type {
   type Inner = Self;
@@ -61,7 +62,8 @@ impl flatbuffers::Push for Type {
 }
 
 #[allow(non_camel_case_types)]
-const ENUM_VALUES_TYPE:[Type; 4] = [
+const ENUM_VALUES_TYPE:[Type; 5] = [
+  Type::Error,
   Type::Connect,
   Type::Disconnect,
   Type::Acknowledge,
@@ -69,7 +71,8 @@ const ENUM_VALUES_TYPE:[Type; 4] = [
 ];
 
 #[allow(non_camel_case_types)]
-const ENUM_NAMES_TYPE:[&'static str; 4] = [
+const ENUM_NAMES_TYPE:[&'static str; 5] = [
+    "Error",
     "Connect",
     "Disconnect",
     "Acknowledge",
@@ -122,7 +125,7 @@ impl<'a> Message<'a> {
 
   #[inline]
   pub fn msg_type(&self) -> Type {
-    self._tab.get::<Type>(Message::VT_MSG_TYPE, Some(Type::Connect)).unwrap()
+    self._tab.get::<Type>(Message::VT_MSG_TYPE, Some(Type::Error)).unwrap()
   }
   #[inline]
   pub fn seq_num(&self) -> u64 {
@@ -143,7 +146,7 @@ impl<'a> Default for MessageArgs<'a> {
     #[inline]
     fn default() -> Self {
         MessageArgs {
-            msg_type: Type::Connect,
+            msg_type: Type::Error,
             seq_num: 0,
             payload: None,
         }
@@ -156,7 +159,7 @@ pub struct MessageBuilder<'a: 'b, 'b> {
 impl<'a: 'b, 'b> MessageBuilder<'a, 'b> {
   #[inline]
   pub fn add_msg_type(&mut self, msg_type: Type) {
-    self.fbb_.push_slot::<Type>(Message::VT_MSG_TYPE, msg_type, Type::Connect);
+    self.fbb_.push_slot::<Type>(Message::VT_MSG_TYPE, msg_type, Type::Error);
   }
   #[inline]
   pub fn add_seq_num(&mut self, seq_num: u64) {

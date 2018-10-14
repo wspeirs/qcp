@@ -1,10 +1,11 @@
 namespace BBR;
 
 enum Type:byte {
-        Connect,
-        Disconnect,
-        Acknowledge,
-        Message
+    Error,  // this is a totally bogus type to catch errors on decode
+    Connect,
+    Disconnect,
+    Acknowledge,
+    Message
 }
 
 table Message {

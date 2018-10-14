@@ -112,17 +112,17 @@ impl<'a> Message<'a> {
       let mut builder = MessageBuilder::new(_fbb);
       builder.add_seq_num(args.seq_num);
       if let Some(x) = args.payload { builder.add_payload(x); }
-      builder.add_type_(args.type_);
+      builder.add_msg_type(args.msg_type);
       builder.finish()
     }
 
-    pub const VT_TYPE_: flatbuffers::VOffsetT = 4;
+    pub const VT_MSG_TYPE: flatbuffers::VOffsetT = 4;
     pub const VT_SEQ_NUM: flatbuffers::VOffsetT = 6;
     pub const VT_PAYLOAD: flatbuffers::VOffsetT = 8;
 
   #[inline]
-  pub fn type_(&self) -> Type {
-    self._tab.get::<Type>(Message::VT_TYPE_, Some(Type::Connect)).unwrap()
+  pub fn msg_type(&self) -> Type {
+    self._tab.get::<Type>(Message::VT_MSG_TYPE, Some(Type::Connect)).unwrap()
   }
   #[inline]
   pub fn seq_num(&self) -> u64 {
@@ -135,7 +135,7 @@ impl<'a> Message<'a> {
 }
 
 pub struct MessageArgs<'a> {
-    pub type_: Type,
+    pub msg_type: Type,
     pub seq_num: u64,
     pub payload: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a ,  u8>>>,
 }
@@ -143,7 +143,7 @@ impl<'a> Default for MessageArgs<'a> {
     #[inline]
     fn default() -> Self {
         MessageArgs {
-            type_: Type::Connect,
+            msg_type: Type::Connect,
             seq_num: 0,
             payload: None,
         }
@@ -155,8 +155,8 @@ pub struct MessageBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> MessageBuilder<'a, 'b> {
   #[inline]
-  pub fn add_type_(&mut self, type_: Type) {
-    self.fbb_.push_slot::<Type>(Message::VT_TYPE_, type_, Type::Connect);
+  pub fn add_msg_type(&mut self, msg_type: Type) {
+    self.fbb_.push_slot::<Type>(Message::VT_MSG_TYPE, msg_type, Type::Connect);
   }
   #[inline]
   pub fn add_seq_num(&mut self, seq_num: u64) {
@@ -181,5 +181,26 @@ impl<'a: 'b, 'b> MessageBuilder<'a, 'b> {
   }
 }
 
+#[inline]
+pub fn get_root_as_message<'a>(buf: &'a [u8]) -> Message<'a> {
+  flatbuffers::get_root::<Message<'a>>(buf)
+}
+
+#[inline]
+pub fn get_size_prefixed_root_as_message<'a>(buf: &'a [u8]) -> Message<'a> {
+  flatbuffers::get_size_prefixed_root::<Message<'a>>(buf)
+}
+
+#[inline]
+pub fn finish_message_buffer<'a, 'b>(
+    fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+    root: flatbuffers::WIPOffset<Message<'a>>) {
+  fbb.finish(root, None);
+}
+
+#[inline]
+pub fn finish_size_prefixed_message_buffer<'a, 'b>(fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>, root: flatbuffers::WIPOffset<Message<'a>>) {
+  fbb.finish_size_prefixed(root, None);
+}
 }  // pub mod BBR
 

@@ -2,17 +2,16 @@ use std::net::{UdpSocket, SocketAddr};
 use std::io::{Error as IOError, ErrorKind};
 use std::time::Duration;
 
-use rmp_serde::encode::to_vec;
-use rmp_serde::decode::from_slice;
-
 use transport::Transport;
 
 const MAX_BUFFER_SIZE :usize = 1500;  // max size of a buffer
 
-use message_generated::bbr::Message;
+use flatbuffers::FlatBufferBuilder;
+use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
 
 pub struct BBRTransport {
-    socket: UdpSocket
+    socket: UdpSocket,
+    seq_num: u64
 }
 
 impl BBRTransport {
@@ -20,32 +19,38 @@ impl BBRTransport {
         let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), addr.port());
         let socket = UdpSocket::bind(local_addr)?;
 
+        // set the read and write timeouts to 3s
+        socket.set_read_timeout(Some(Duration::new(3, 0)));
+        socket.set_write_timeout(Some(Duration::new(3, 0)));
+
+        // "connect" the socket to the end-point address
         socket.connect(addr).expect("Error connecting UDP socket");
 
-//        let buf = to_vec(&Message::Connect(0)).expect("Error serializing message");
-//
-//        socket.send(&buf).expect("Could not send connect message");
-//
-//        socket.set_read_timeout(Some(Duration::new(3, 0)));
-//
-//        let mut buf = vec![0; MAX_BUFFER_SIZE];
-//        socket.recv(&mut buf)?;
-//
-//        let ack = from_slice(&buf);
-//
-//        if let Result::Err(e) = ack {
-//            return Err(IOError::new(ErrorKind::InvalidData, format!("Error decoding message: {:?}", e)));
-//        }
-//
-//        if let Message::Acknowledge(s) = ack.unwrap() {
-//            if s != 0 {
-//                return Err(IOError::new(ErrorKind::InvalidData, "Acknowledged wrong sequence number"));
-//            }
-//        } else {
-//            return Err(IOError::new(ErrorKind::ConnectionAborted, "Did not get Acknowledge on Connect"));
-//        }
+        // construct the Connect message
+        let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_BUFFER_SIZE);
 
-        return Ok(BBRTransport { socket });
+        let msg = Message::create(&mut fbb, &MessageArgs { msg_type: Type::Connect, seq_num: 0, payload: None });
+
+        fbb.finish(msg, None);
+        let msg_data = fbb.finished_data();
+
+        // send the connection message
+        socket.send(msg_data).expect("Could not send connect message");
+
+        let mut buf = vec![0; MAX_BUFFER_SIZE];
+        socket.recv(&mut buf)?;
+
+        let ack = get_root_as_message(&buf);
+
+        if ack.msg_type() != Type::Acknowledge {
+            return Err(IOError::new(ErrorKind::ConnectionAborted, "Did not get Acknowledge on Connect"));
+        }
+
+        if ack.seq_num() != 0 {
+            return Err(IOError::new(ErrorKind::InvalidData, "Acknowledged wrong sequence number"));
+        }
+
+        return Ok(BBRTransport { socket, seq_num: 1 });
     }
 }
 
@@ -66,7 +71,6 @@ impl Transport for BBRTransport {
 
 #[cfg(test)]
 mod tests {
-    use rmp_serde::encode::to_vec;
     use std::u64::MAX;
 
     use flatbuffers::FlatBufferBuilder;
@@ -90,7 +94,7 @@ mod tests {
 
         let buf = fbb.create_vector(&[0xBBu8; 1465]);
 
-        let msg = Message::create(&mut fbb, &MessageArgs { type_: Type::Message, seq_num: 0, payload: Some(buf) });
+        let msg = Message::create(&mut fbb, &MessageArgs { msg_type: Type::Message, seq_num: 0, payload: Some(buf) });
 
         fbb.finish(msg, None);
 

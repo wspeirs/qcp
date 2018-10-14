@@ -1,12 +1,7 @@
-#[macro_use]
-extern crate log;
-extern crate simplelog;
-extern crate clap;
-extern crate serde;
-#[macro_use] extern crate serde_derive;
-extern crate rmp_serde;
-
+#[macro_use] extern crate clap;
 extern crate flatbuffers;
+#[macro_use] extern crate log;
+extern crate simplelog;
 
 use std::io::Error as IOError;
 use std::io::Write;

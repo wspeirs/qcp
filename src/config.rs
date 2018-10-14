@@ -3,7 +3,7 @@ use clap::{Arg, App};
 use std::io::{Error as IOError, ErrorKind};
 use std::fs::File;
 use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
+
 
 pub struct Configuration {
     sender: bool,

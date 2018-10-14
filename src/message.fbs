@@ -8,7 +8,9 @@ enum Type:byte {
 }
 
 table Message {
-    type: Type;
+    msg_type: Type;
     seq_num:uint64;
     payload:[ubyte];
 }
+
+root_type Message;

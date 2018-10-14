@@ -1,0 +1,14 @@
+namespace BBR;
+
+enum Type:byte {
+        Connect,
+        Disconnect,
+        Acknowledge,
+        Message
+}
+
+table Message {
+    type: Type;
+    seq_num:uint64;
+    payload:[ubyte];
+}

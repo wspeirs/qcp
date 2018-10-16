@@ -1,5 +1,5 @@
 use std::clone::Clone;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -11,10 +11,11 @@ struct SlidingWindowData<T> {
 }
 
 /// A sliding window that holds items of type T
+#[derive(Clone)]
 pub struct SlidingWindow<T> {
-    start: AtomicUsize,     // first item in the window; TODO: change to AtomicI64
+    start: Arc<AtomicUsize>,     // first item in the window; TODO: change to AtomicI64
     size: usize,  // size of the window, needed so we can access w/out getting the Mutex
-    inner: Mutex<SlidingWindowData<T>>
+    inner: Arc<Mutex<SlidingWindowData<T>>>
 }
 
 impl <T> SlidingWindow<T> where T: Clone {
@@ -25,7 +26,7 @@ impl <T> SlidingWindow<T> where T: Clone {
 
         let inner = SlidingWindowData { items, head: 0, tail: 1 };
 
-        return SlidingWindow { start: AtomicUsize::new(0), size: window_size, inner: Mutex::new(inner) };
+        return SlidingWindow { start: Arc::new(AtomicUsize::new(0)), size: window_size, inner: Arc::new(Mutex::new(inner)) };
     }
 
     /// Insert an item at a given location in the window
@@ -44,7 +45,9 @@ impl <T> SlidingWindow<T> where T: Clone {
         // lock the mutex here
         let mut inner = self.inner.lock().unwrap();
 
-        let index : usize = (loc as usize - self.start.load(Ordering::Relaxed)) + inner.head;
+        let index : usize = ((loc as usize - self.start.load(Ordering::Relaxed)) + inner.head) % inner.items.len();
+
+        println!("INDEX: {}, LOC: {}, START: {}, HEAD: {}", index, loc, self.start.load(Ordering::Relaxed), inner.head);
 
         if inner.items[index].is_some() {
             return Err("Value already set");
@@ -111,6 +114,9 @@ impl <T> SlidingWindow<T> where T: Clone {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
 
     use sliding_window::SlidingWindow;
 
@@ -120,7 +126,33 @@ mod tests {
 
         assert!(sw.insert(3, "hello").is_ok());
         assert!(sw.insert(3, "world").is_err());
-//        assert!(sw.insert(64, "wrong").is_err());
+    }
+
+    #[test]
+    fn blocking() {
+        let mut sw_arc = Arc::new(SlidingWindow::<&str>::new(3));
+
+        assert!(Arc::make_mut(&mut sw_arc).insert(0, "a").is_ok());
+        assert!(Arc::make_mut(&mut sw_arc).insert(1, "b").is_ok());
+        assert!(Arc::make_mut(&mut sw_arc).insert(2, "c").is_ok());
+
+        let mut sw_clone = Arc::make_mut(&mut sw_arc).clone();
+        let mut removed = Arc::new(Mutex::new(false));
+
+        let removed_clone = removed.clone();
+
+        thread::spawn(move || {
+            thread::sleep_ms(500);
+            let mut removed = removed_clone.lock().unwrap();
+            sw_clone.remove(0);
+            *removed = true;
+        });
+
+        assert!(Arc::make_mut(&mut sw_arc).insert(3, "d").is_ok());
+
+        if ! *removed.lock().unwrap() {
+            panic!("Inserted before removed");
+        }
     }
 
     #[test]

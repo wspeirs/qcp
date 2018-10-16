@@ -33,21 +33,21 @@ impl <T> SlidingWindow<T> where T: Clone {
     /// Any inserts outside of [start, start+window_size) will return None
     /// Otherwise, the value that was in the window position is returned
     pub fn insert(&mut self, loc: u64, item: T) -> Result<(), &str> {
-        if loc < self.start.load(Ordering::Relaxed) as u64 {
+        if loc < self.start.load(Ordering::Acquire) as u64 {
             return Err("loc < start");
         }
 
         // wait until room is made for this insert
-        while loc >= (self.start.load(Ordering::Relaxed) + self.size) as u64 {
+        while loc >= (self.start.load(Ordering::Acquire) + self.size) as u64 {
             thread::yield_now();
         }
 
         // lock the mutex here
         let mut inner = self.inner.lock().unwrap();
 
-        let index : usize = ((loc as usize - self.start.load(Ordering::Relaxed)) + inner.head) % inner.items.len();
+        let index : usize = ((loc as usize - self.start.load(Ordering::Acquire)) + inner.head) % inner.items.len();
 
-        println!("INDEX: {}, LOC: {}, START: {}, HEAD: {}", index, loc, self.start.load(Ordering::Relaxed), inner.head);
+        println!("INDEX: {}, LOC: {}, START: {}, HEAD: {}", index, loc, self.start.load(Ordering::Acquire), inner.head);
 
         if inner.items[index].is_some() {
             return Err("Value already set");
@@ -67,7 +67,7 @@ impl <T> SlidingWindow<T> where T: Clone {
     /// Removes the item at the location
     /// Returns None if there is no item there, and does not slide the window
     pub fn remove(&mut self, loc: u64) -> Result<T, &str> {
-        let start = self.start.load(Ordering::Relaxed);
+        let start = self.start.load(Ordering::Acquire);
 
         if loc < start as u64 {
             return Err("loc < start");
@@ -78,7 +78,7 @@ impl <T> SlidingWindow<T> where T: Clone {
         // lock the mutex here
         let mut inner = self.inner.lock().unwrap();
 
-        let index : usize = (loc as usize - self.start.load(Ordering::Relaxed)) + inner.head;
+        let index : usize = (loc as usize - self.start.load(Ordering::Acquire)) + inner.head;
 
         if inner.items[index].is_none() {
             return Err("Value not set");
@@ -89,7 +89,7 @@ impl <T> SlidingWindow<T> where T: Clone {
                 loop {
                     // update our head and start values
                     inner.head = (inner.head + 1) % inner.items.len();
-                    self.start.fetch_add(1, Ordering::Relaxed);
+                    self.start.fetch_add(1, Ordering::AcqRel);
 
                     // keep closing the window, if we're not at the end
                     // and the items are None
@@ -106,7 +106,7 @@ impl <T> SlidingWindow<T> where T: Clone {
 
     /// Get the [start, end) of the window
     pub fn window(&self) -> (u64, u64) {
-        let start :u64 = self.start.load(Ordering::Relaxed) as u64;
+        let start :u64 = self.start.load(Ordering::Acquire) as u64;
 
         (start, start + self.size as u64)
     }

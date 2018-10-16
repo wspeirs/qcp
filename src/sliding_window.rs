@@ -1,12 +1,20 @@
 use std::clone::Clone;
+use std::sync::Mutex;
+use std::thread;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 
-/// A sliding window that holds items of type T
-pub struct SlidingWindow<T> {
+struct SlidingWindowData<T> {
     items: Vec<Option<T>>,
     head: usize,    // first index in the vector
     tail: usize,    // last index in the vector
-    start: u64,     // first item in the window
+}
+
+/// A sliding window that holds items of type T
+pub struct SlidingWindow<T> {
+    start: AtomicUsize,     // first item in the window; TODO: change to AtomicI64
+    size: usize,  // size of the window, needed so we can access w/out getting the Mutex
+    inner: Mutex<SlidingWindowData<T>>
 }
 
 impl <T> SlidingWindow<T> where T: Clone {
@@ -15,31 +23,39 @@ impl <T> SlidingWindow<T> where T: Clone {
     pub fn new(window_size: usize) -> SlidingWindow<T> {
         let items = vec![None; window_size];
 
-        return SlidingWindow { items, head: 0, tail: 1, start: 0 };
+        let inner = SlidingWindowData { items, head: 0, tail: 1 };
+
+        return SlidingWindow { start: AtomicUsize::new(0), size: window_size, inner: Mutex::new(inner) };
     }
 
     /// Insert an item at a given location in the window
     /// Any inserts outside of [start, start+window_size) will return None
     /// Otherwise, the value that was in the window position is returned
     pub fn insert(&mut self, loc: u64, item: T) -> Result<(), &str> {
-        if loc < self.start {
+        if loc < self.start.load(Ordering::Relaxed) as u64 {
             return Err("loc < start");
-        } else if loc >= self.start + self.items.len() as u64  {
-            return Err("loc >= end");
         }
 
-        let index : usize = (loc - self.start) as usize + self.head;
+        // wait until room is made for this insert
+        while loc >= (self.start.load(Ordering::Relaxed) + self.size) as u64 {
+            thread::yield_now();
+        }
 
-        if self.items[index].is_some() {
+        // lock the mutex here
+        let mut inner = self.inner.lock().unwrap();
+
+        let index : usize = (loc as usize - self.start.load(Ordering::Relaxed)) + inner.head;
+
+        if inner.items[index].is_some() {
             return Err("Value already set");
         }
 
         // insert the item
-        self.items[index] = Some(item);
+        inner.items[index] = Some(item);
 
         // update our tail
-        if index >= self.tail {
-            self.tail = (index + 1) % self.items.len();
+        if index >= inner.tail {
+            inner.tail = (index + 1) % inner.items.len();
         }
 
         return Ok( () );
@@ -48,28 +64,33 @@ impl <T> SlidingWindow<T> where T: Clone {
     /// Removes the item at the location
     /// Returns None if there is no item there, and does not slide the window
     pub fn remove(&mut self, loc: u64) -> Result<T, &str> {
-        if loc < self.start {
+        let start = self.start.load(Ordering::Relaxed);
+
+        if loc < start as u64 {
             return Err("loc < start");
-        } else if loc >= self.start + self.items.len() as u64  {
+        } else if loc >= (start + self.size) as u64  {
             return Err("loc >= end");
         }
 
-        let index : usize = (loc - self.start) as usize + self.head;
+        // lock the mutex here
+        let mut inner = self.inner.lock().unwrap();
 
-        if self.items[index].is_none() {
+        let index : usize = (loc as usize - self.start.load(Ordering::Relaxed)) + inner.head;
+
+        if inner.items[index].is_none() {
             return Err("Value not set");
         } else {
-            let ret = self.items[index].take().expect("Unwrapped already checked value");
+            let ret = inner.items[index].take().expect("Unwrapped already checked value");
 
-            if index == self.head {
+            if index == inner.head {
                 loop {
                     // update our head and start values
-                    self.head = (self.head + 1) % self.items.len();
-                    self.start += 1;
+                    inner.head = (inner.head + 1) % inner.items.len();
+                    self.start.fetch_add(1, Ordering::Relaxed);
 
                     // keep closing the window, if we're not at the end
                     // and the items are None
-                    if self.head == self.tail || self.items[self.head].is_some() {
+                    if inner.head == inner.tail || inner.items[inner.head].is_some() {
                         break;
                     }
                 }
@@ -82,7 +103,9 @@ impl <T> SlidingWindow<T> where T: Clone {
 
     /// Get the [start, end) of the window
     pub fn window(&self) -> (u64, u64) {
-        (self.start, self.start + self.items.len() as u64)
+        let start :u64 = self.start.load(Ordering::Relaxed) as u64;
+
+        (start, start + self.size as u64)
     }
 }
 
@@ -97,7 +120,7 @@ mod tests {
 
         assert!(sw.insert(3, "hello").is_ok());
         assert!(sw.insert(3, "world").is_err());
-        assert!(sw.insert(64, "wrong").is_err());
+//        assert!(sw.insert(64, "wrong").is_err());
     }
 
     #[test]

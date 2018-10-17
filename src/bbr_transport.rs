@@ -107,23 +107,53 @@ impl Sender {
         let recv_window = window.clone();
 
         thread::spawn(move || {
-            recv_socket.set_read_timeout(None).expect("Could not set read timeout");
+            // we'll only wait for 1s for an Ack
+            recv_socket.set_read_timeout(Some(Duration::from_secs(1))).expect("Could not set read timeout");
 
             let mut buf = vec![0; MAX_PACKET_SIZE];
 
-            // read an ack
-            let (amt, addr) = recv_socket.recv_from(&mut buf).expect("Error reading");
+            loop {
+                // attempt to read an ack
+                let res = recv_socket.recv_from(&mut buf);
 
-            let ack = get_root_as_message(&buf[0..amt]);
+                // waited for an Ack, but didn't come
+                if let Err(e) = res {
+                    if e.kind() != ErrorKind::WouldBlock {
+                        panic!("Unknown error reading ACK: {:?}", e);
+                    }
 
-            if ack.msg_type() != Type::Acknowledge {
-                panic!("Got non-ack message");
+                    // find the first one that matches the predicate
+                    let loc = recv_window.lock().unwrap().find_first(|t :&(Instant, Vec<u8>)| t.0.elapsed() > Duration::from_secs(3));
+
+                    // we're able to find any old enough, loop back around
+                    if loc.is_none() {
+                        continue;
+                    }
+
+                    let loc = loc.unwrap() as u64;
+
+                    // remove the packet from the window, so we can update the time
+                    let (_, packet) = recv_window.lock().unwrap().remove(loc).expect("Error removing item we previously found");
+
+                    // re-send the packet
+                    recv_socket.send_to(&packet, remote_addr);
+
+                    // re-insert the packet with an updated timeout
+                    recv_window.lock().unwrap().insert(loc, (Instant::now(), packet));
+                } else if res.is_ok() {
+                    let (amt, _) = res.unwrap();
+                    let ack = get_root_as_message(&buf[0..amt]);
+
+                    if ack.msg_type() != Type::Acknowledge {
+                        panic!("Got non-ack message");
+                    }
+
+                    // remove it from the sliding window
+                    let (sent_time, _) = recv_window.lock().unwrap().remove(ack.seq_num()).expect("Acknowledging bad sequence number");
+
+                    // TODO: deal with the instant values
+                }
             }
-
-            // remove it from the sliding window
-            let (sent_time, _) = recv_window.lock().unwrap().remove(ack.seq_num()).expect("Acknowledging bad sequence number");
-
-            // TODO: deal with the instant values
         });
 
         return Ok(Sender { socket, remote_addr, seq_num: 1, window });

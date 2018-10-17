@@ -104,6 +104,26 @@ impl <T> SlidingWindow<T> where T: Clone {
         }
     }
 
+    /// Find the first item in the window that satisfies the predicate
+    pub fn find_first<P>(&mut self, mut predicate: P) -> Option<usize> where P: FnMut(&T) -> bool {
+        let inner = self.inner.lock().unwrap();
+        let mut cur = inner.head;
+
+        while cur != inner.tail {
+            if inner.items[cur].is_some() {
+                let item = inner.items[cur].as_ref().unwrap();
+
+                if predicate(item) {
+                    return Some(cur + self.start.load(Ordering::Acquire));
+                }
+            }
+
+            cur = (cur + 1) % self.size; // increment w/wrap
+        }
+
+        return None;
+    }
+
     /// Get the [start, end) of the window
     pub fn window(&self) -> (u64, u64) {
         let start :u64 = self.start.load(Ordering::Acquire) as u64;

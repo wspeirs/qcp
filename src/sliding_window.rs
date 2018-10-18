@@ -106,7 +106,7 @@ impl <T> SlidingWindow<T> where T: Clone {
     }
 
     /// Find the first item in the window that satisfies the predicate
-    pub fn find_first<P>(&mut self, mut predicate: P) -> Option<usize> where P: FnMut(&T) -> bool {
+    pub fn find_first<P>(&self, mut predicate: P) -> Option<usize> where P: FnMut(&T) -> bool {
         let inner = self.inner.lock().unwrap();
         let mut cur = inner.head;
 

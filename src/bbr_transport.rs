@@ -27,13 +27,13 @@ struct Sender {
     socket: UdpSocket,
     remote_addr: SocketAddr,
     seq_num: u64,
-    window: Arc<Mutex<SlidingWindow<(Instant, Vec<u8>)>>>
+    window: Arc<SlidingWindow<(Instant, Vec<u8>)>>
 }
 
 struct Receiver {
     socket: UdpSocket,
     remote_addr: SocketAddr,
-    window: Arc<Mutex<SlidingWindow<Vec<u8>>>>
+    window: Arc<SlidingWindow<Vec<u8>>>
 }
 
 /// Constructs a simple message w/out a payload
@@ -101,7 +101,7 @@ impl Sender {
             return Err(IOError::new(ErrorKind::InvalidData, "Acknowledged wrong sequence number"));
         }
 
-        let window = Arc::new(Mutex::new(SlidingWindow::new(1024)));
+        let window = Arc::new(SlidingWindow::new(1024));
 
         let recv_socket = socket.try_clone()?;
         let recv_window = window.clone();
@@ -123,7 +123,7 @@ impl Sender {
                     }
 
                     // find the first one that matches the predicate
-                    let loc = recv_window.lock().unwrap().find_first(|t :&(Instant, Vec<u8>)| t.0.elapsed() > Duration::from_secs(3));
+                    let loc = recv_window.find_first(|t :&(Instant, Vec<u8>)| t.0.elapsed() > Duration::from_secs(3));
 
                     // we're able to find any old enough, loop back around
                     if loc.is_none() {
@@ -133,13 +133,13 @@ impl Sender {
                     let loc = loc.unwrap() as u64;
 
                     // remove the packet from the window, so we can update the time
-                    let (_, packet) = recv_window.lock().unwrap().remove(loc).expect("Error removing item we previously found");
+                    let (_, packet) = recv_window.remove(loc).expect("Error removing item we previously found");
 
                     // re-send the packet
                     recv_socket.send_to(&packet, remote_addr);
 
                     // re-insert the packet with an updated timeout
-                    recv_window.lock().unwrap().insert(loc, (Instant::now(), packet));
+                    recv_window.insert(loc, (Instant::now(), packet));
                 } else if res.is_ok() {
                     let (amt, _) = res.unwrap();
                     let ack = get_root_as_message(&buf[0..amt]);
@@ -149,7 +149,7 @@ impl Sender {
                     }
 
                     // remove it from the sliding window
-                    let (sent_time, _) = recv_window.lock().unwrap().remove(ack.seq_num()).expect("Acknowledging bad sequence number");
+                    let (sent_time, _) = recv_window.remove(ack.seq_num()).expect("Acknowledging bad sequence number");
 
                     // TODO: deal with the instant values
                 }
@@ -184,7 +184,7 @@ impl Receiver {
         // send the ACK message
         socket.send_to(ack_data, remote_addr);
 
-        let window = Arc::new(Mutex::new(SlidingWindow::new(1024)));
+        let window = Arc::new(SlidingWindow::new(1024));
 
         return Ok(Receiver { socket, remote_addr, window });
     }
@@ -207,21 +207,19 @@ impl Transport for Sender {
             fbb.finish(msg, None);
             let msg_buf = fbb.finished_data().to_vec();
 
-            let mut end = { self.window.lock().unwrap().window().1 };
+            let mut end = { self.window.window().1 };
 
             // wait for a slot in the window
             while end <= self.seq_num {
                 thread::yield_now();
 
-                end = { self.window.lock().unwrap().window().1 };
+                end = { self.window.window().1 };
             }
 
             {
-                let mut window = self.window.lock().unwrap();
-
                 self.socket.send_to(&msg_buf, self.remote_addr);
 
-                window.insert(self.seq_num, (Instant::now(), msg_buf));
+                self.window.insert(self.seq_num, (Instant::now(), msg_buf));
             }
 
         }

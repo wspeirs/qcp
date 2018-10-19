@@ -23,14 +23,14 @@ pub fn buf2string(buf: &[u8]) -> String {
     ret
 }
 
-struct Sender {
+pub struct Sender {
     socket: UdpSocket,
     remote_addr: SocketAddr,
     seq_num: u64,
     window: Arc<SlidingWindow<(Instant, Vec<u8>)>>
 }
 
-struct Receiver {
+pub struct Receiver {
     socket: UdpSocket,
     remote_addr: SocketAddr,
     window: Arc<SlidingWindow<Vec<u8>>>
@@ -141,6 +141,7 @@ impl Sender {
                     // re-insert the packet with an updated timeout
                     recv_window.insert(loc, (Instant::now(), packet));
                 } else if res.is_ok() {
+                    // otherwise, we got a message
                     let (amt, _) = res.unwrap();
                     let ack = get_root_as_message(&buf[0..amt]);
 

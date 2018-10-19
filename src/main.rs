@@ -4,10 +4,10 @@ extern crate flatbuffers;
 extern crate simplelog;
 
 use std::io::Error as IOError;
-use std::io::Write;
 use std::process::exit;
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
 use std::error::Error;
 
 use simplelog::{TermLogger, LevelFilter, Config};
@@ -20,19 +20,46 @@ mod message_generated;
 mod sliding_window;
 
 use config::Configuration;
+use transport::Transport;
 
-use bbr_transport::{Sender, Receiver};
+use bbr_transport::{Sender, Receiver, MAX_PAYLOAD_SIZE};
 
 fn main() -> Result<(), Box<Error>> {
     TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
     let config = Configuration::new()?;
 
-//    if config.sender() {
-//        Sender::new(config);
-//    } else {
-//        Receiver::new(config);
-//    }
+    if config.sender() {
+        let mut sender = Sender::connect(config.addr())?;
+        let mut file = OpenOptions::new().read(true).create(false).open(config.file())?;
+
+        let mut buf = vec![0; MAX_PAYLOAD_SIZE];
+
+        loop {
+            let amt = file.read(&mut buf)?;
+
+            if amt == 0 {
+                break;
+            }
+
+            sender.write_all(&buf[0..amt]);
+        }
+    } else {
+        let mut recver = Receiver::listen(config.addr())?;
+        let mut file = OpenOptions::new().write(true).create(true).open(config.file())?;
+
+        let mut buf = vec![0; MAX_PAYLOAD_SIZE];
+
+        loop {
+            let amt = recver.read(&mut buf)?;
+
+            if amt == 0 {
+                break;
+            }
+
+            file.write_all(&buf[0..amt]);
+        }
+    }
 
     Ok( () )
 }

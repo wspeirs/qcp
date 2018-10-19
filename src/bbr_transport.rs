@@ -8,7 +8,7 @@ use transport::Transport;
 use sliding_window::SlidingWindow;
 
 const MAX_PACKET_SIZE :usize = 1500;    // max size of a packet to be sent over the wire
-const MAX_PAYLOAD_SIZE :usize = 1465;   // max payload size to ensure the packet is <= MAX_PACKET_SIZE
+pub const MAX_PAYLOAD_SIZE :usize = 1465;   // max payload size to ensure the packet is <= MAX_PACKET_SIZE
 
 use flatbuffers::FlatBufferBuilder;
 use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
@@ -51,7 +51,7 @@ fn construct_message<'a>(msg_type: Type, seq_num: u64) -> FlatBufferBuilder<'a> 
 impl Sender {
     /// Connect, via BBR, to a remote host
     pub fn connect(remote_addr: SocketAddr) -> Result<impl Transport, IOError> {
-        let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), remote_addr.port());
+        let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), 1234);
         let socket = UdpSocket::bind(local_addr)?;
 
         // set the read and write timeouts to 3s
@@ -163,8 +163,8 @@ impl Sender {
 
 impl Receiver {
     /// Listens for an incoming connection
-    pub fn listen(port: u16) -> Result<impl Transport, IOError> {
-        let socket = UdpSocket::bind(SocketAddr::new("0.0.0.0".parse().unwrap(), port))?;
+    pub fn listen(local_addr: SocketAddr) -> Result<impl Transport, IOError> {
+        let socket = UdpSocket::bind(local_addr)?;
 
         // set the write timeouts to 3s
         socket.set_write_timeout(Some(Duration::new(3, 0)))?;
@@ -196,7 +196,7 @@ impl Transport for Sender {
         panic!("Not implemented");
     }
 
-    fn write_all(&mut self, buf: &mut[u8]) -> Result<(), IOError> {
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), IOError> {
         let chunk_it = buf.chunks(MAX_PAYLOAD_SIZE);
 
         for chunk in chunk_it {
@@ -234,7 +234,7 @@ impl Transport for Receiver {
         return Ok(1);
     }
 
-    fn write_all(&mut self, buf: &mut[u8]) -> Result<(), IOError> {
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), IOError> {
         panic!("Not implemented");
     }
 }
@@ -280,7 +280,7 @@ mod tests {
     fn listen() {
         TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
-        let t = Receiver::listen(1234);
+        let t = Receiver::listen("0.0.0.0:1234".parse().unwrap());
     }
 
     #[test]

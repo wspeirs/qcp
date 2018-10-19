@@ -10,7 +10,7 @@ impl Transport for TcpStream {
         return Read::read(self, buf);
     }
 
-    fn write_all(&mut self, buf: &mut[u8]) -> Result<(), IOError> {
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), IOError> {
         return Write::write_all(self, buf);
     }
 }

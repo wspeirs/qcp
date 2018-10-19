@@ -23,7 +23,6 @@ impl Configuration {
             .group(ArgGroup::with_name("direction").args(&["send", "recv"]).required(true))
             .arg(Arg::with_name("send")
                 .long("send")
-                .requires("FILE")
                 .help("Send files"))
             .arg(Arg::with_name("recv")
                 .long("recv")
@@ -46,6 +45,7 @@ impl Configuration {
                 .multiple(true)
                 .help("Sets the level of verbosity"))
             .arg(Arg::with_name("FILE")
+                .required(true)
                 .help("The file to transfer")
                 .index(1))
             .get_matches();
@@ -79,6 +79,10 @@ impl Configuration {
 
     pub fn sender(&self) -> bool {
         self.sender
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
     }
 
     pub fn file(&self) -> &PathBuf {

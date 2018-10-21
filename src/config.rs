@@ -71,7 +71,7 @@ impl Configuration {
             return Ok(Configuration {
                 sender,
                 addr: addr,
-                file: None
+                file: Some(PathBuf::from(file.unwrap()))
             });
         }
 

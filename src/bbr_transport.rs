@@ -187,6 +187,54 @@ impl Receiver {
 
         let window = Arc::new(SlidingWindow::new(1024));
 
+        let recv_socket = socket.try_clone()?;
+        let recv_window = window.clone();
+
+        thread::spawn(move || {
+            // we'll only wait for 1s for an Ack
+            recv_socket.set_read_timeout(None).expect("Could not set read timeout");
+
+            let mut buf = vec![0; MAX_PACKET_SIZE];
+
+            loop {
+                // read a message
+                let res = recv_socket.recv_from(&mut buf);
+
+                if let Err(e) = res {
+                    panic!("Error reading message: {:?}", e);
+                }
+
+                let (amt, _) = res.expect("Error unwrapping OK");
+                let message = get_root_as_message(&buf[0..amt]);
+
+                if message.msg_type() != Type::Message {
+                    panic!("Unexpected message type: {:?}", message.msg_type());
+                }
+
+                let seq_num = message.seq_num();
+
+                let (start, end) = recv_window.window();
+
+                // check to see if the message is old
+                // messages that are >= end, we'll simply block on insert waiting for the
+                // reader to pick-up everything else
+                if seq_num < start {
+                    continue;
+                }
+
+                let payload = message.payload().expect("No payload for message");
+
+                debug!("RECV PACKET: {} at {}", payload.len(), seq_num);
+
+                //
+                // TODO: Sequence number is off!!!
+                //
+
+                // insert the packet into the window
+                recv_window.insert(seq_num, payload.to_vec());
+            }
+        });
+
         return Ok(Receiver { socket, remote_addr, window });
     }
 }
@@ -231,26 +279,19 @@ impl Transport for Sender {
 
 impl Transport for Receiver {
     fn read(&mut self, buf: &mut[u8]) -> Result<usize, IOError> {
-        return Ok(1);
+        let packet = self.window.pop();
+
+        buf.copy_from_slice(packet.as_slice());
+
+        debug!("READ: {} length buf", packet.len());
+
+        return Ok(packet.len());
     }
 
     fn write_all(&mut self, buf: &[u8]) -> Result<(), IOError> {
         panic!("Not implemented");
     }
 }
-
-//impl Transport for BBRTransport {
-//    /// Read up to buf.len() bytes from the underlying transport
-//    fn read(&mut self, buf: &mut[u8]) -> Result<usize, IOError> {
-//        return Ok(1);
-//    }
-//
-//    /// Write all buf.len() bytes to the underlying transport
-//    fn write_all(&mut self, buf: &mut[u8]) -> Result<(), IOError> {
-//
-//        return Ok( () );
-//    }
-//}
 
 
 #[cfg(test)]

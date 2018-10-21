@@ -65,24 +65,16 @@ impl <T> SlidingWindow<T> where T: Clone {
         return Ok( () );
     }
 
-    /// Removes the item at the location
-    /// Returns None if there is no item there, and does not slide the window
-    pub fn remove(&self, loc: u64) -> Result<T, &str> {
-        let start = self.start.load(Ordering::Acquire);
-
-        if loc < start as u64 {
-            return Err("loc < start");
-        } else if loc >= (start + self.size) as u64  {
-            return Err("loc >= end");
-        }
-
+    /// Removes an item in the window, given a location relative to the index
+    /// ie, you have to compute loc - start already, and pass that in
+    fn inner_remove(&self, relative_loc: u64) -> Option<T> {
         // lock the mutex here
         let mut inner = self.inner.lock().unwrap();
 
-        let index : usize = (loc as usize - self.start.load(Ordering::Acquire)) + inner.head;
+        let index : usize = relative_loc as usize + inner.head;
 
         if inner.items[index].is_none() {
-            return Err("Value not set");
+            return None;
         } else {
             let ret = inner.items[index].take().expect("Unwrapped already checked value");
 
@@ -101,7 +93,41 @@ impl <T> SlidingWindow<T> where T: Clone {
 
             }
 
-            return Ok(ret);
+            return Some(ret);
+        }
+    }
+
+
+    /// Removes the item at the location
+    /// Returns None if there is no item there, and does not slide the window
+    pub fn remove(&self, loc: u64) -> Result<T, &str> {
+        let start = self.start.load(Ordering::Acquire);
+
+        if loc < start as u64 {
+            return Err("loc < start");
+        } else if loc >= (start + self.size) as u64  {
+            return Err("loc >= end");
+        }
+
+        match self.inner_remove(loc - start as u64) {
+            None => Err("Value is none"),
+            Some(t) => Ok(t)
+        }
+    }
+
+    /// Returns the first element in the window
+    /// Saves you from having to do:
+    /// let (start, end) = w.window();
+    /// let t = w.remove(start);
+    pub fn pop(&self) -> T {
+        loop {
+            let res = self.inner_remove(0);
+
+            if res.is_none() {
+                thread::yield_now();
+            } else {
+                return res.unwrap();
+            }
         }
     }
 
@@ -176,6 +202,21 @@ mod tests {
         if ! *removed.lock().unwrap() {
             panic!("Inserted before removed");
         }
+    }
+
+    #[test]
+    fn pop_test() {
+        let mut sw = SlidingWindow::<&str>::new(16);
+
+        // insert 3 items in order
+        assert!(sw.insert(0, "a").is_ok());
+        assert!(sw.insert(1, "b").is_ok());
+        assert!(sw.insert(2, "c").is_ok());
+        assert_eq!((0,16), sw.window());
+
+        assert_eq!("a", sw.pop());
+        assert_eq!("b", sw.pop());
+        assert_eq!("c", sw.pop());
     }
 
     #[test]

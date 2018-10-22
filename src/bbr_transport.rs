@@ -9,6 +9,7 @@ use sliding_window::SlidingWindow;
 
 const MAX_PACKET_SIZE :usize = 1500;    // max size of a packet to be sent over the wire
 pub const MAX_PAYLOAD_SIZE :usize = 1452;   // max payload size to ensure the packet is <= MAX_PACKET_SIZE
+const WINDOW_SIZE :usize = 256;
 
 use flatbuffers::FlatBufferBuilder;
 use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
@@ -101,7 +102,7 @@ impl Sender {
             return Err(IOError::new(ErrorKind::InvalidData, "Acknowledged wrong sequence number"));
         }
 
-        let window = Arc::new(SlidingWindow::new(1024));
+        let window = Arc::new(SlidingWindow::new(WINDOW_SIZE));
 
         let recv_socket = socket.try_clone()?;
         let recv_window = window.clone();
@@ -185,20 +186,19 @@ impl Receiver {
         // send the ACK message
         socket.send_to(ack_data, remote_addr);
 
-        let window = Arc::new(SlidingWindow::new(1024));
+        let window = Arc::new(SlidingWindow::new(WINDOW_SIZE));
 
-        let recv_socket = socket.try_clone()?;
+        let socket_clone = socket.try_clone()?;
         let recv_window = window.clone();
 
         thread::spawn(move || {
-            // we'll only wait for 1s for an Ack
-            recv_socket.set_read_timeout(None).expect("Could not set read timeout");
+            socket_clone.set_read_timeout(None).expect("Could not set read timeout");
 
             let mut buf = vec![0; MAX_PACKET_SIZE];
 
             loop {
                 // read a message
-                let res = recv_socket.recv_from(&mut buf);
+                let res = socket_clone.recv_from(&mut buf);
 
                 if let Err(e) = res {
                     panic!("Error reading message: {:?}", e);
@@ -228,6 +228,19 @@ impl Receiver {
 
                 // insert the packet into the window
                 recv_window.insert(seq_num, payload.to_vec());
+
+                let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_PACKET_SIZE);
+                let ack = Message::create(&mut fbb, &MessageArgs { msg_type: Type::Acknowledge, seq_num, payload: None });
+
+                fbb.finish(ack, None);
+
+                let ack_buf = fbb.finished_data().to_vec();
+
+                if ack_buf.len() > MAX_PACKET_SIZE {
+                    panic!("About to send ACK packet larger than max packet: {} > {}", ack_buf.len(), MAX_PACKET_SIZE);
+                }
+
+                socket_clone.send_to(&ack_buf, remote_addr);
             }
         });
 

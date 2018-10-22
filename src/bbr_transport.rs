@@ -8,7 +8,7 @@ use transport::Transport;
 use sliding_window::SlidingWindow;
 
 const MAX_PACKET_SIZE :usize = 1500;    // max size of a packet to be sent over the wire
-pub const MAX_PAYLOAD_SIZE :usize = 1465;   // max payload size to ensure the packet is <= MAX_PACKET_SIZE
+pub const MAX_PAYLOAD_SIZE :usize = 1452;   // max payload size to ensure the packet is <= MAX_PACKET_SIZE
 
 use flatbuffers::FlatBufferBuilder;
 use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
@@ -157,7 +157,7 @@ impl Sender {
             }
         });
 
-        return Ok(Sender { socket, remote_addr, seq_num: 1, window });
+        return Ok(Sender { socket, remote_addr, seq_num: 0, window });
     }
 }
 
@@ -226,10 +226,6 @@ impl Receiver {
 
                 debug!("RECV PACKET: {} at {}", payload.len(), seq_num);
 
-                //
-                // TODO: Sequence number is off!!!
-                //
-
                 // insert the packet into the window
                 recv_window.insert(seq_num, payload.to_vec());
             }
@@ -248,6 +244,8 @@ impl Transport for Sender {
         let chunk_it = buf.chunks(MAX_PAYLOAD_SIZE);
 
         for chunk in chunk_it {
+            debug!("CHUNK LEN: {}", chunk.len());
+
             // construct the message w/the payload
             let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_PACKET_SIZE);
             let payload = Some(fbb.create_vector(chunk));
@@ -255,6 +253,13 @@ impl Transport for Sender {
 
             fbb.finish(msg, None);
             let msg_buf = fbb.finished_data().to_vec();
+
+            if msg_buf.len() > MAX_PACKET_SIZE {
+                panic!("About to send a packet larger than max packet: {} > {}", msg_buf.len(), MAX_PACKET_SIZE);
+            }
+
+            debug!("SENDING SEQ: {} LEN: {}", self.seq_num, msg_buf.len());
+            trace!("PACKET: {}", buf2string(msg_buf.as_slice()));
 
             let mut end = { self.window.window().1 };
 
@@ -266,9 +271,9 @@ impl Transport for Sender {
             }
 
             {
-                self.socket.send_to(&msg_buf, self.remote_addr);
-
-                self.window.insert(self.seq_num, (Instant::now(), msg_buf));
+                self.socket.send_to(&msg_buf, self.remote_addr); // send the packet
+                self.window.insert(self.seq_num, (Instant::now(), msg_buf)); // insert into the window
+                self.seq_num += 1; // bump our sequence number
             }
 
         }
@@ -281,7 +286,7 @@ impl Transport for Receiver {
     fn read(&mut self, buf: &mut[u8]) -> Result<usize, IOError> {
         let packet = self.window.pop();
 
-        buf.copy_from_slice(packet.as_slice());
+        buf[..packet.len()].copy_from_slice(packet.as_slice());
 
         debug!("READ: {} length buf", packet.len());
 
@@ -296,15 +301,17 @@ impl Transport for Receiver {
 
 #[cfg(test)]
 mod tests {
-    use std::u64::MAX;
+    extern crate rand;
+
     use simplelog::{TermLogger, LevelFilter, Config};
 
-    use bbr_transport::{Sender, Receiver, buf2string};
+    use bbr_transport::{Sender, Receiver, buf2string, MAX_PAYLOAD_SIZE, MAX_PACKET_SIZE};
     use std::net::SocketAddr;
 
     use flatbuffers::FlatBufferBuilder;
     use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
 
+    use self::rand::{thread_rng, Rng};
 
     #[test]
     fn connect() {
@@ -324,28 +331,40 @@ mod tests {
         let t = Receiver::listen("0.0.0.0:1234".parse().unwrap());
     }
 
-    #[test]
-    fn encode() {
-        let mut fbb = FlatBufferBuilder::new_with_capacity(1500);
+    fn encode_decode(seq_num: u64) {
+        let mut fbb = FlatBufferBuilder::new_with_capacity(MAX_PACKET_SIZE);
+        let payload = thread_rng().gen_iter::<u8>().take(MAX_PAYLOAD_SIZE).collect::<Vec<u8>>();
 
-        let buf = fbb.create_vector(&[0xBBu8; 1465]);
+        let buf = fbb.create_vector(&payload);
 
-        let msg = Message::create(&mut fbb, &MessageArgs { msg_type: Type::Message, seq_num: 0, payload: Some(buf) });
+        let msg = Message::create(&mut fbb, &MessageArgs { msg_type: Type::Message, seq_num, payload: Some(buf) });
 
         fbb.finish(msg, None);
 
         let msg_buf = fbb.finished_data();
 
-        println!("LEN: {}", msg_buf.len());
-        println!("{}", buf2string(msg_buf));
+        println!("PACKET: {} {}", msg_buf.len(), buf2string(msg_buf));
+        assert!(msg_buf.len() <= MAX_PACKET_SIZE);
+
+        let msg = get_root_as_message(&msg_buf);
+        let payload = msg.payload().expect("Error getting payload");
+
+        println!("TYPE: {:?}", msg.msg_type());
+        println!("SEQ NUM: {:x}", msg.seq_num());
+        println!("PAYLOAD: {} {}", payload.len(), buf2string(payload));
+        assert!(payload.len() <= MAX_PAYLOAD_SIZE);
     }
 
     #[test]
-    fn decode_fail() {
-        let msg_buf = vec![0; 1500];
-
-        let msg = get_root_as_message(&msg_buf);
-
-        println!("{:?}", msg.msg_type());
+    fn multiple_encode_decode() {
+        encode_decode(0); println!();
+        encode_decode(0xAA); println!();
+        encode_decode(0xAABB); println!();
+        encode_decode(0xAABBCC); println!();
+        encode_decode(0xAABBCCDD); println!();
+        encode_decode(0xAABBCCDD_11); println!();
+        encode_decode(0xAABBCCDD_1122); println!();
+        encode_decode(0xAABBCCDD_112233); println!();
+        encode_decode(0xAABBCCDD_11223344); println!();
     }
 }

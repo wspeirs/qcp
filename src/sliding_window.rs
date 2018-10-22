@@ -48,7 +48,7 @@ impl <T> SlidingWindow<T> where T: Clone {
 
         let index : usize = ((loc as usize - self.start.load(Ordering::Acquire)) + inner.head) % inner.items.len();
 
-        println!("INDEX: {}, LOC: {}, START: {}, HEAD: {}", index, loc, self.start.load(Ordering::Acquire), inner.head);
+        debug!("INDEX: {}, LOC: {}, START: {}, HEAD: {}", index, loc, self.start.load(Ordering::Acquire), inner.head);
 
         if inner.items[index].is_some() {
             return Err("Value already set");

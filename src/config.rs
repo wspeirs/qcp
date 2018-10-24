@@ -5,12 +5,25 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::net::{SocketAddr};
 use std::error::Error;
+use std::default::Default;
 
 
 pub struct Configuration {
     sender: bool,
     addr: SocketAddr,
+    window_size: usize,
     file: Option<PathBuf>,
+}
+
+impl Default for Configuration {
+    fn default() -> Self {
+        Configuration {
+            sender: false,
+            addr: "127.0.0.1:1234".parse().unwrap(),
+            window_size: 1024,
+            file: Some(PathBuf::from("/tmp/test"))
+        }
+    }
 }
 
 
@@ -40,6 +53,12 @@ impl Configuration {
                 .value_name("PORT")
                 .default_value("1234")
                 .help("Port to connect to when sending, or listen on when receiving"))
+            .arg(Arg::with_name("window-size")
+                .short("w")
+                .long("window-size")
+                .takes_value(true)
+                .default_value("1024")
+                .help("The size of the sliding window"))
             .arg(Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -56,6 +75,7 @@ impl Configuration {
         let host = matches.value_of("host").expect("Expected default host value");
         let port = matches.value_of("port").expect("Expected default port value");
         let addr = SocketAddr::new(host.parse()?, port.parse()?);
+        let window_size = matches.value_of("window-size").expect("Expected default window-size").parse::<usize>()?;
 
         debug!("ADDR: {:?}", addr);
 
@@ -63,14 +83,16 @@ impl Configuration {
             info!("Sending file {} to {}", file.unwrap(), addr);
             return Ok(Configuration {
                 sender,
-                addr: addr,
+                addr,
+                window_size,
                 file: Some(PathBuf::from(file.unwrap())),
             });
         } else {
             info!("Receiving file, listening on {}", addr);
             return Ok(Configuration {
                 sender,
-                addr: addr,
+                addr,
+                window_size,
                 file: Some(PathBuf::from(file.unwrap()))
             });
         }
@@ -83,6 +105,10 @@ impl Configuration {
 
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    pub fn window_size(&self) -> usize {
+        self.window_size
     }
 
     pub fn file(&self) -> &PathBuf {

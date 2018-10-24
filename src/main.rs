@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<Error>> {
     let config = Configuration::new()?;
 
     if config.sender() {
-        let mut sender = Sender::connect(config.addr())?;
+        let mut sender = Sender::connect(&config)?;
         let mut file = OpenOptions::new().read(true).create(false).open(config.file())?;
 
         let mut buf = vec![0; MAX_PAYLOAD_SIZE];
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<Error>> {
             sender.write_all(&buf[0..amt]);
         }
     } else {
-        let mut recver = Receiver::listen(config.addr())?;
+        let mut recver = Receiver::listen(&config)?;
         let mut file = OpenOptions::new().write(true).create(true).open(config.file())?;
 
         let mut buf = vec![0; MAX_PAYLOAD_SIZE];

@@ -71,7 +71,7 @@ impl <T> SlidingWindow<T> where T: Clone {
         // lock the mutex here
         let mut inner = self.inner.lock().unwrap();
 
-        let index : usize = relative_loc as usize + inner.head;
+        let index : usize = (relative_loc as usize + inner.head) % self.size;
 
         if inner.items[index].is_none() {
             return None;

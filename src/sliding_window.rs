@@ -40,6 +40,8 @@ impl <T> SlidingWindow<T> where T: Clone {
 
         // wait until room is made for this insert
         while loc >= (self.start.load(Ordering::Acquire) + self.size) as u64 {
+            let window = self.window();
+            warn!("Yielding thread on insert: {} -> {}; {}", window.0, window.1, loc);
             thread::yield_now();
         }
 
@@ -124,6 +126,8 @@ impl <T> SlidingWindow<T> where T: Clone {
             let res = self.inner_remove(0);
 
             if res.is_none() {
+                let window = self.window();
+                warn!("Yielding on a pop: {} -> {}", window.0, window.1);
                 thread::yield_now();
             } else {
                 return res.unwrap();

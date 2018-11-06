@@ -2,9 +2,10 @@ use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
 use std::io;
 use std::time::Duration;
 use std::fmt::Debug;
+use std::marker::Sized;
 
 pub trait Socket {
-    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<T>;
+    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<Self> where Self: Sized;
 
     fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> io::Result<usize>;
 
@@ -18,7 +19,7 @@ pub trait Socket {
 }
 
 impl Socket for UdpSocket {
-    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<T> {
+    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<Self> {
         return UdpSocket::bind(addr);
     }
 
@@ -53,7 +54,7 @@ mod test {
     pub struct MockSocket { }
 
     impl Socket for MockSocket {
-        fn bind<A: ToSocketAddrs + Debug, T: Socket>(addr: A) -> io::Result<T> {
+        fn bind<A: ToSocketAddrs + Debug, T: Socket>(addr: A) -> io::Result<Self> {
             debug!("Called bind: {:?}", addr);
 
             return Ok( MockSocket { } );

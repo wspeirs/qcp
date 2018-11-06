@@ -50,7 +50,7 @@ fn construct_message<'a>(msg_type: Type, seq_num: u64) -> FlatBufferBuilder<'a> 
     return fbb;
 }
 
-impl <T> Sender<T> where T: Socket + Send + Sync {
+impl <T: 'static> Sender<T> where T: Socket + Send + Sync {
     /// Connect, via BBR, to a remote host
     pub fn connect(config: &Configuration) -> Result<impl Transport, IOError> {
         let remote_addr = config.addr();
@@ -164,7 +164,7 @@ impl <T> Sender<T> where T: Socket + Send + Sync {
     }
 }
 
-impl <T> Receiver<T> where T: Socket + Send + Sync {
+impl <T: 'static> Receiver<T> where T: Socket + Send + Sync {
     /// Listens for an incoming connection
     pub fn listen(config: &Configuration) -> Result<impl Transport, IOError> {
         let local_addr = config.addr();

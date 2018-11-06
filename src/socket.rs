@@ -1,9 +1,10 @@
 use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
 use std::io;
 use std::time::Duration;
+use std::fmt::Debug;
 
 pub trait Socket {
-    fn bind<A: ToSocketAddrs, T: Socket + Send + Sync>(addr: A) -> io::Result<T>;
+    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<T>;
 
     fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> io::Result<usize>;
 
@@ -17,7 +18,7 @@ pub trait Socket {
 }
 
 impl Socket for UdpSocket {
-    fn bind<A: ToSocketAddrs, T: Socket>(addr: A) -> io::Result<T> {
+    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<T> {
         return UdpSocket::bind(addr);
     }
 
@@ -37,7 +38,7 @@ impl Socket for UdpSocket {
         return UdpSocket::set_write_timeout(self, dur);
     }
 
-    fn try_clone<T: Socket>(&self) -> io::Result<T> {
+    fn try_clone<T: Socket + Send + Sync>(&self) -> io::Result<T> {
         return UdpSocket::try_clone(self);
     }
 }
@@ -47,14 +48,15 @@ mod test {
     use std::io;
     use std::time::Duration;
     use socket::Socket;
+    use std::fmt::Debug;
 
     pub struct MockSocket { }
 
     impl Socket for MockSocket {
-        fn bind<A: ToSocketAddrs, T: Socket>(addr: A) -> io::Result<T> {
+        fn bind<A: ToSocketAddrs + Debug, T: Socket>(addr: A) -> io::Result<T> {
             debug!("Called bind: {:?}", addr);
 
-            return MockSocket { };
+            return Ok( MockSocket { } );
         }
 
         fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> io::Result<usize> {
@@ -77,6 +79,12 @@ mod test {
         fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
             debug!("Called set_write_timeout: {:?}", dur);
             return Ok( () );
+        }
+
+        fn try_clone<T: Socket + Send + Sync>(&self) -> io::Result<T> {
+            debug!("Called try clone");
+
+            return Ok( MockSocket{} );
         }
     }
 }

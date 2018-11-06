@@ -278,18 +278,20 @@ impl Transport for Sender {
 
             let mut end = { self.window.window().1 };
 
-            // wait for a slot in the window
-            while end <= self.seq_num {
-                thread::yield_now();
+//            // wait for a slot in the window
+//            while end <= self.seq_num {
+//                let window = self.window.window();
+//                panic!("Yielding on write_all: {} -> {}; {}", window.0, window.1, self.seq_num);
+//                thread::yield_now();
+//
+//                end = { self.window.window().1 };
+//            }
 
-                end = { self.window.window().1 };
-            }
-
-            {
+//            {
                 self.socket.send_to(&msg_buf, self.remote_addr); // send the packet
                 self.window.insert(self.seq_num, (Instant::now(), msg_buf)); // insert into the window
                 self.seq_num += 1; // bump our sequence number
-            }
+//            }
 
         }
 

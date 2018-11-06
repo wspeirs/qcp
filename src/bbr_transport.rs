@@ -324,7 +324,7 @@ mod tests {
     use simplelog::{TermLogger, LevelFilter, Config};
 
     use bbr_transport::{Sender, Receiver, buf2string, MAX_PAYLOAD_SIZE, MAX_PACKET_SIZE};
-    use std::net::SocketAddr;
+    use std::net::{SocketAddr, UdpSocket};
 
     use flatbuffers::FlatBufferBuilder;
     use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
@@ -335,7 +335,7 @@ mod tests {
     fn connect() {
         TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
-        let t = Sender::connect(&Default::default());
+        let t = Sender::<UdpSocket>::connect(&Default::default());
 
         assert!(t.is_err());
 
@@ -346,7 +346,7 @@ mod tests {
     fn listen() {
         TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
 
-        let t = Receiver::listen(&Default::default());
+        let t = Receiver::<UdpSocket>::listen(&Default::default());
     }
 
     fn encode_decode(seq_num: u64) {

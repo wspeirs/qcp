@@ -4,10 +4,10 @@ use std::time::Duration;
 use std::fmt::Debug;
 use std::marker::Sized;
 
-pub trait Socket {
-    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<Self> where Self: Sized;
+pub trait Socket: Sized {
+    fn bind<A: ToSocketAddrs + Debug>(addr: A) -> io::Result<Self>;
 
-    fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> io::Result<usize>;
+    fn send_to<A: ToSocketAddrs + Debug>(&self, buf: &[u8], addr: A) -> io::Result<usize>;
 
     fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)>;
 
@@ -15,15 +15,15 @@ pub trait Socket {
 
     fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()>;
 
-    fn try_clone<T: Socket + Send + Sync>(&self) -> io::Result<T>;
+    fn try_clone(&self) -> io::Result<Self>;
 }
 
 impl Socket for UdpSocket {
-    fn bind<A: ToSocketAddrs + Debug, T: Socket + Send + Sync>(addr: A) -> io::Result<Self> {
+    fn bind<A: ToSocketAddrs + Debug>(addr: A) -> io::Result<Self> {
         return UdpSocket::bind(addr);
     }
 
-    fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> io::Result<usize> {
+    fn send_to<A: ToSocketAddrs + Debug>(&self, buf: &[u8], addr: A) -> io::Result<usize> {
         return UdpSocket::send_to(self, buf, addr);
     }
 
@@ -39,7 +39,7 @@ impl Socket for UdpSocket {
         return UdpSocket::set_write_timeout(self, dur);
     }
 
-    fn try_clone<T: Socket + Send + Sync>(&self) -> io::Result<T> {
+    fn try_clone(&self) -> io::Result<Self> {
         return UdpSocket::try_clone(self);
     }
 }
@@ -54,13 +54,13 @@ mod test {
     pub struct MockSocket { }
 
     impl Socket for MockSocket {
-        fn bind<A: ToSocketAddrs + Debug, T: Socket>(addr: A) -> io::Result<Self> {
+        fn bind<A: ToSocketAddrs + Debug>(addr: A) -> io::Result<Self> {
             debug!("Called bind: {:?}", addr);
 
             return Ok( MockSocket { } );
         }
 
-        fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> io::Result<usize> {
+        fn send_to<A: ToSocketAddrs + Debug>(&self, buf: &[u8], addr: A) -> io::Result<usize> {
             debug!("Called send_to: {:?}", addr);
 
             return Ok(5);
@@ -82,7 +82,7 @@ mod test {
             return Ok( () );
         }
 
-        fn try_clone<T: Socket + Send + Sync>(&self) -> io::Result<T> {
+        fn try_clone(&self) -> io::Result<Self> {
             debug!("Called try clone");
 
             return Ok( MockSocket{} );

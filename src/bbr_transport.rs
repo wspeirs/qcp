@@ -7,6 +7,7 @@ use std::thread;
 use transport::Transport;
 use sliding_window::SlidingWindow;
 use config::Configuration;
+use socket::Socket;
 
 const MAX_PACKET_SIZE :usize = 1500;    // max size of a packet to be sent over the wire
 pub const MAX_PAYLOAD_SIZE :usize = 1452;   // max payload size to ensure the packet is <= MAX_PACKET_SIZE
@@ -24,15 +25,15 @@ pub fn buf2string(buf: &[u8]) -> String {
     ret
 }
 
-pub struct Sender {
-    socket: UdpSocket,
+pub struct Sender<T> {
+    socket: T,
     remote_addr: SocketAddr,
     seq_num: u64,
     window: Arc<SlidingWindow<(Instant, Vec<u8>)>>
 }
 
-pub struct Receiver {
-    socket: UdpSocket,
+pub struct Receiver<T> {
+    socket: T,
     remote_addr: SocketAddr,
     window: Arc<SlidingWindow<Vec<u8>>>
 }
@@ -49,12 +50,12 @@ fn construct_message<'a>(msg_type: Type, seq_num: u64) -> FlatBufferBuilder<'a> 
     return fbb;
 }
 
-impl Sender {
+impl <T> Sender<T> where T: Socket + Send + Sync {
     /// Connect, via BBR, to a remote host
     pub fn connect(config: &Configuration) -> Result<impl Transport, IOError> {
         let remote_addr = config.addr();
         let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), 1234);
-        let socket = UdpSocket::bind(local_addr)?;
+        let socket :T = T::bind(local_addr)?;
 
         // set the read and write timeouts to 3s
         socket.set_read_timeout(Some(Duration::new(3, 0)))?;
@@ -105,7 +106,7 @@ impl Sender {
 
         let window = Arc::new(SlidingWindow::new(config.window_size()));
 
-        let recv_socket = socket.try_clone()?;
+        let recv_socket :T = socket.try_clone()?;
         let recv_window = window.clone();
 
         thread::spawn(move || {
@@ -163,11 +164,11 @@ impl Sender {
     }
 }
 
-impl Receiver {
+impl <T> Receiver<T> where T: Socket + Send + Sync {
     /// Listens for an incoming connection
     pub fn listen(config: &Configuration) -> Result<impl Transport, IOError> {
         let local_addr = config.addr();
-        let socket = UdpSocket::bind(local_addr)?;
+        let socket :T = T::bind(local_addr)?;
 
         // set the write timeouts to 3s
         socket.set_write_timeout(Some(Duration::new(3, 0)))?;
@@ -190,7 +191,7 @@ impl Receiver {
 
         let window = Arc::new(SlidingWindow::new(config.window_size()));
 
-        let socket_clone = socket.try_clone()?;
+        let socket_clone :T = socket.try_clone()?;
         let recv_window = window.clone();
 
         thread::spawn(move || {
@@ -250,7 +251,7 @@ impl Receiver {
     }
 }
 
-impl Transport for Sender {
+impl <T> Transport for Sender<T> where T: Socket {
     fn read(&mut self, buf: &mut[u8]) -> Result<usize, IOError> {
         panic!("Not implemented");
     }
@@ -297,7 +298,7 @@ impl Transport for Sender {
     }
 }
 
-impl Transport for Receiver {
+impl <T> Transport for Receiver<T> where T: Socket {
     fn read(&mut self, buf: &mut[u8]) -> Result<usize, IOError> {
         let packet = self.window.pop();
 

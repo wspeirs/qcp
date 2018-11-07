@@ -52,10 +52,8 @@ fn construct_message<'a>(msg_type: Type, seq_num: u64) -> FlatBufferBuilder<'a> 
 
 impl <T: 'static> Sender<T> where T: Socket + Send + Sync {
     /// Connect, via BBR, to a remote host
-    pub fn connect(config: &Configuration) -> Result<impl Transport, IOError> {
+    pub fn connect(socket: T, config: &Configuration) -> Result<impl Transport, IOError> {
         let remote_addr = config.addr();
-        let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), 1234);
-        let socket :T = T::bind(local_addr)?;
 
         // set the read and write timeouts to 3s
         socket.set_read_timeout(Some(Duration::new(3, 0)))?;
@@ -166,10 +164,7 @@ impl <T: 'static> Sender<T> where T: Socket + Send + Sync {
 
 impl <T: 'static> Receiver<T> where T: Socket + Send + Sync {
     /// Listens for an incoming connection
-    pub fn listen(config: &Configuration) -> Result<impl Transport, IOError> {
-        let local_addr = config.addr();
-        let socket :T = T::bind(local_addr)?;
-
+    pub fn listen(socket: T, config: &Configuration) -> Result<impl Transport, IOError> {
         // set the write timeouts to 3s
         socket.set_write_timeout(Some(Duration::new(3, 0)))?;
 
@@ -319,23 +314,28 @@ impl <T> Transport for Receiver<T> where T: Socket {
 
 #[cfg(test)]
 mod tests {
-    extern crate rand;
-
     use simplelog::{TermLogger, LevelFilter, Config};
 
     use bbr_transport::{Sender, Receiver, buf2string, MAX_PAYLOAD_SIZE, MAX_PACKET_SIZE};
+    use config::Configuration;
+    use socket::Socket;
+    use transport::Transport;
     use std::net::{SocketAddr, UdpSocket};
+    use std::thread;
 
     use flatbuffers::FlatBufferBuilder;
     use message_generated::bbr::{get_root_as_message, Message, MessageArgs, Type};
 
-    use self::rand::{thread_rng, Rng};
+    use socket::mocks::PacketDroppingSocket;
+    use rand::{thread_rng, Rng};
 
     #[test]
-    fn connect() {
+    fn udp_connect() {
         TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
+        let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), 1234);
+        let socket = UdpSocket::bind(local_addr).expect("Couldn't bind socket");
 
-        let t = Sender::<UdpSocket>::connect(&Default::default());
+        let t = Sender::<UdpSocket>::connect(socket, &Default::default());
 
         assert!(t.is_err());
 
@@ -343,10 +343,12 @@ mod tests {
     }
 
     #[test]
-    fn listen() {
+    fn udp_listen() {
         TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
+        let local_addr = SocketAddr::new("0.0.0.0".parse().unwrap(), 1234);
+        let socket = UdpSocket::bind(local_addr).expect("Couldno't bind socket");
 
-        let t = Receiver::<UdpSocket>::listen(&Default::default());
+        let t = Receiver::<UdpSocket>::listen(socket, &Default::default());
     }
 
     fn encode_decode(seq_num: u64) {
@@ -375,6 +377,8 @@ mod tests {
 
     #[test]
     fn multiple_encode_decode() {
+        TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
+
         encode_decode(0); println!();
         encode_decode(0xAA); println!();
         encode_decode(0xAABB); println!();
@@ -384,5 +388,38 @@ mod tests {
         encode_decode(0xAABBCCDD_1122); println!();
         encode_decode(0xAABBCCDD_112233); println!();
         encode_decode(0xAABBCCDD_11223344); println!();
+    }
+
+    #[test]
+    fn packet_drops() {
+        TermLogger::init(LevelFilter::Debug, Config::default()).unwrap();
+
+        let mock_socket = PacketDroppingSocket::new();
+        let duplex_socket = mock_socket.duplex();
+
+        let send_handle = thread::Builder::new().name("send".into()).spawn(move || {
+            let config = Configuration::default();
+            let mut sender = Sender::<PacketDroppingSocket>::connect(mock_socket, &config).expect("Couldn't call connect");
+            let mut buf = vec![0xAA; MAX_PAYLOAD_SIZE];
+
+            for _ in 0..100 {
+                sender.write_all(&buf).expect("Error calling write_all");
+            }
+        }).expect("Error spawning send thread");
+
+        let recv_handle = thread::Builder::new().name("recv".into()).spawn(move || {
+            let config = Configuration::default();
+            let mut recver = Receiver::<PacketDroppingSocket>::listen(duplex_socket, &config).expect("Couldn't create receiver");
+            let mut buf = vec![0xAA; MAX_PAYLOAD_SIZE];
+
+            for _ in 0..100 {
+                if recver.read(&mut buf).expect("Error calling read") != buf.len() {
+                    panic!("Did not read everything");
+                }
+            }
+        }).expect("Error spawning recv thread");
+
+        send_handle.join();
+        recv_handle.join();
     }
 }
